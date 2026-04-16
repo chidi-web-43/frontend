@@ -1,33 +1,71 @@
 import { useEffect, useState } from "react";
+import { getPublicResults } from "../services/api";
 
 function AdminResults() {
   const electionYear =
     localStorage.getItem("electionYear") ||
     new Date().getFullYear().toString();
 
-  const [candidates, setCandidates] = useState([]);
-  const [votes, setVotes] = useState({});
+  const [results, setResults] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const API_BASE_URL = "http://localhost:5000";
 
   useEffect(() => {
-    const storedCandidates =
-      JSON.parse(localStorage.getItem(`candidates_${electionYear}`)) || [];
-    const storedVotes =
-      JSON.parse(localStorage.getItem(`votes_${electionYear}`)) || {};
-
-    setCandidates(storedCandidates);
-    setVotes(storedVotes);
+    loadResults();
   }, [electionYear]);
 
-  // Group candidates by position (case-insensitive and trimmed)
-  const grouped = candidates.reduce((acc, c) => {
-    const positionKey = c.position.trim();
-    if (!acc[positionKey]) acc[positionKey] = [];
-    acc[positionKey].push(c);
-    return acc;
-  }, {});
+  const loadResults = async () => {
+    setLoading(true);
+    try {
+      const data = await getPublicResults(electionYear);
+      setResults(data);
+      setError("");
+    } catch (err) {
+      console.error("Error loading results:", err);
+      setError("Failed to load results. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  // Sort positions alphabetically
+  // Helper function to get image URL
+  const getImageUrl = (imagePath) => {
+    if (!imagePath) return null;
+    if (imagePath.startsWith('http')) return imagePath;
+    return `${API_BASE_URL}${imagePath}`;
+  };
+
+  const grouped = results.results || {};
   const sortedPositions = Object.keys(grouped).sort();
+
+  if (loading) {
+    return (
+      <div className="container py-5 text-center">
+        <div className="spinner-border text-primary" role="status">
+          <span className="visually-hidden">Loading...</span>
+        </div>
+        <p className="mt-3">Loading results...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="container py-5">
+        <div className="alert alert-danger text-center">
+          <i className="bi bi-exclamation-triangle me-2"></i>
+          {error}
+        </div>
+        <div className="text-center">
+          <button className="btn btn-primary" onClick={loadResults}>
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="container py-5">
@@ -52,17 +90,15 @@ function AdminResults() {
 
       <div className="row g-4">
         {sortedPositions.map((position) => {
-          const positionCandidates = grouped[position];
+          const positionCandidates = grouped[position] || [];
           
           // Calculate winner for this position
-          const winner = positionCandidates.reduce((max, c) => {
-            const maxVotes = votes[max.id] || 0;
-            const currentVotes = votes[c.id] || 0;
-            return currentVotes > maxVotes ? c : max;
-          }, positionCandidates[0]);
+          const winner = positionCandidates.length > 0 ? positionCandidates.reduce((max, c) => {
+            return (c.votes || 0) > (max.votes || 0) ? c : max;
+          }, positionCandidates[0]) : null;
 
-          const winnerVotes = votes[winner?.id] || 0;
-          const totalVotes = positionCandidates.reduce((sum, c) => sum + (votes[c.id] || 0), 0);
+          const winnerVotes = winner?.votes || 0;
+          const totalVotes = positionCandidates.reduce((sum, c) => sum + (c.votes || 0), 0);
 
           return (
             <div className="col-12" key={position}>
@@ -78,7 +114,7 @@ function AdminResults() {
                 </div>
 
                 <div className="card-body p-0">
-                  {/* Winner Announcement - Like Senate Card */}
+                  {/* Winner Announcement */}
                   {winner && (
                     <div className="bg-success bg-opacity-10 p-3 border-bottom">
                       <div className="d-flex align-items-center">
@@ -113,7 +149,7 @@ function AdminResults() {
                       </thead>
                       <tbody>
                         {positionCandidates.map((candidate, index) => {
-                          const candidateVotes = votes[candidate.id] || 0;
+                          const candidateVotes = candidate.votes || 0;
                           const votePercentage = totalVotes > 0 
                             ? Math.round((candidateVotes / totalVotes) * 100) 
                             : 0;
@@ -124,14 +160,20 @@ function AdminResults() {
                               <td className="text-center fw-bold">{index + 1}</td>
                               <td>
                                 <div className="d-flex align-items-center">
-                                  <img
-                                    src={candidate.image}
-                                    alt={candidate.name}
-                                    width="35"
-                                    height="35"
-                                    className="rounded-circle me-2"
-                                    style={{ objectFit: "cover" }}
-                                  />
+                                  {candidate.image && (
+                                    <img
+                                      src={getImageUrl(candidate.image)}
+                                      alt={candidate.name}
+                                      width="35"
+                                      height="35"
+                                      className="rounded-circle me-2"
+                                      style={{ objectFit: "cover" }}
+                                      onError={(e) => {
+                                        e.target.onerror = null;
+                                        e.target.src = "https://via.placeholder.com/35x35?text=No+Image";
+                                      }}
+                                    />
+                                  )}
                                   <span className="fw-medium">{candidate.name}</span>
                                 </div>
                               </td>

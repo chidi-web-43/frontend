@@ -1,11 +1,14 @@
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import Footer from "../components/Footer";
+import { getDashboard } from "../services/api";
+import { initializeSocket, getSocket, disconnectSocket } from "../services/socket";
 
 function Dashboard() {
   const navigate = useNavigate();
 
   // ================= AUTH DATA =================
+  const token = localStorage.getItem("studentToken");
   const matricNumber = localStorage.getItem("matricNumber");
   const studentName = localStorage.getItem("studentName");
 
@@ -14,83 +17,129 @@ function Dashboard() {
     localStorage.getItem("electionYear") ||
     new Date().getFullYear().toString();
 
-  const [votingStatus, setVotingStatus] = useState(
-    localStorage.getItem(`votingStatus_${electionYear}`) || "closed"
-  );
-  const [hasVoted, setHasVoted] = useState(false);
-  const [totalStudents, setTotalStudents] = useState(0);
-  const [votedCount, setVotedCount] = useState(0);
+  const [dashboardData, setDashboardData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [isConnected, setIsConnected] = useState(false);
 
-  // ================= LOAD ALL DATA =================
-  const loadVotingData = () => {
-    // Get latest voting status
-    const currentStatus = localStorage.getItem(`votingStatus_${electionYear}`) || "closed";
-    setVotingStatus(currentStatus);
+  // ================= LOAD DASHBOARD DATA FROM BACKEND =================
+  const loadDashboardData = async () => {
+    if (!token) {
+      setLoading(false);
+      return;
+    }
     
-    // Check this student
-    const voted = localStorage.getItem(
-      `voted_${electionYear}_${matricNumber}`
-    );
-    setHasVoted(voted === "true");
-
-    // Turnout
-    const students =
-      JSON.parse(localStorage.getItem(`students_${electionYear}`)) || [];
-    setTotalStudents(students.length);
-
-    const votedStudents = students.filter(
-      (student) =>
-        localStorage.getItem(
-          `voted_${electionYear}_${student.matric}`
-        ) === "true"
-    );
-    setVotedCount(votedStudents.length);
+    try {
+      const data = await getDashboard(token, electionYear);
+      setDashboardData(data);
+      setError("");
+      setLoading(false);
+    } catch (err) {
+      console.error("Error loading dashboard:", err);
+      setError("Failed to load dashboard data. Please refresh the page.");
+      setLoading(false);
+    }
   };
 
-  // ================= ON PAGE LOAD WITH REAL-TIME UPDATES =================
+  // ================= REAL-TIME SOCKET.IO CONNECTION =================
   useEffect(() => {
-    loadVotingData();
+    if (!token) {
+      navigate("/login");
+      return;
+    }
     
-    // Set up real-time event listeners
-    const handleVoteUpdate = () => loadVotingData();
-    const handleDataUpdate = () => loadVotingData();
+    // Initialize Socket.IO connection
+    const socket = initializeSocket(token, electionYear);
     
-    window.addEventListener("voteUpdated", handleVoteUpdate);
-    window.addEventListener("electionDataUpdated", handleDataUpdate);
+    if (socket) {
+      socket.on('connect', () => {
+        console.log('🔌 Socket.IO connected');
+        setIsConnected(true);
+      });
+      
+      socket.on('disconnect', () => {
+        console.log('🔌 Socket.IO disconnected');
+        setIsConnected(false);
+      });
+      
+      // Listen for vote updates
+      socket.on('vote-updated', (data) => {
+        console.log('📡 Real-time vote update received:', data);
+        loadDashboardData(); // Refresh dashboard instantly
+      });
+      
+      // Listen for election status changes
+      socket.on('election-status-changed', (data) => {
+        console.log('📡 Election status changed:', data);
+        loadDashboardData(); // Refresh dashboard instantly
+      });
+    }
     
-    // Refresh data every 5 seconds for real-time updates
-    const interval = setInterval(loadVotingData, 5000);
+    // Initial data load
+    loadDashboardData();
+    
+    // Fallback: Refresh data every 10 seconds (in case socket disconnects)
+    const interval = setInterval(loadDashboardData, 10000);
     
     return () => {
-      window.removeEventListener("voteUpdated", handleVoteUpdate);
-      window.removeEventListener("electionDataUpdated", handleDataUpdate);
+      disconnectSocket();
       clearInterval(interval);
     };
-  }, [electionYear, matricNumber]);
+  }, [electionYear, token]);
 
   // ================= LOGOUT =================
   const handleLogout = () => {
     localStorage.removeItem("studentAuth");
+    localStorage.removeItem("studentToken");
     localStorage.removeItem("matricNumber");
     localStorage.removeItem("studentName");
+    disconnectSocket();
     navigate("/login");
   };
 
-  const turnoutPercentage =
-    totalStudents === 0
-      ? 0
-      : Math.round((votedCount / totalStudents) * 100);
+  if (loading) {
+    return (
+      <div className="d-flex justify-content-center align-items-center" style={{ minHeight: "100vh" }}>
+        <div className="spinner-border text-success" role="status">
+          <span className="visually-hidden">Loading...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="container py-5 text-center">
+        <div className="alert alert-danger">{error}</div>
+        <button className="btn btn-primary" onClick={loadDashboardData}>Retry</button>
+      </div>
+    );
+  }
+
+  const hasVoted = dashboardData?.student?.hasVoted || false;
+  const votingStatus = dashboardData?.election?.status || "closed";
+  const turnoutPercentage = dashboardData?.turnout?.percentage || 0;
+  const votedCount = dashboardData?.turnout?.voted || 0;
+  const totalStudents = dashboardData?.turnout?.total || 0;
 
   return (
     <div style={{ minHeight: "100vh", background: "#f4f6f9" }}>
       {/* ================= TOP BAR ================= */}
       <nav className="navbar navbar-dark bg-success px-4 sticky-top">
         <span className="navbar-brand fw-bold">
+          <i className="bi bi-speedometer2 me-2"></i>
           SUG Voting Dashboard – {electionYear}
         </span>
-        <button onClick={handleLogout} className="btn btn-light btn-sm">
-          Logout
-        </button>
+        <div className="d-flex align-items-center">
+          {isConnected && (
+            <span className="badge bg-success me-2">
+              <i className="bi bi-wifi"></i> Live
+            </span>
+          )}
+          <button onClick={handleLogout} className="btn btn-light btn-sm">
+            <i className="bi bi-box-arrow-right me-1"></i> Logout
+          </button>
+        </div>
       </nav>
 
       <div className="container py-5">
@@ -167,7 +216,9 @@ function Dashboard() {
                 <p>
                   {votedCount} of {totalStudents} voted
                 </p>
-                <small className="text-muted">Updates in real-time</small>
+                <small className="text-muted">
+                  <i className="bi bi-arrow-repeat me-1"></i> Real-time
+                </small>
               </div>
             </div>
           </div>
@@ -204,8 +255,17 @@ function Dashboard() {
         {/* ===== REAL-TIME INDICATOR ===== */}
         <div className="text-center mt-4">
           <small className="text-muted">
-            <i className="bi bi-circle-fill text-success me-1" style={{ fontSize: "8px" }}></i>
-            Live updates active - Data refreshes automatically
+            {isConnected ? (
+              <>
+                <i className="bi bi-circle-fill text-success me-1" style={{ fontSize: "8px" }}></i>
+                Live updates active - Connected to real-time server
+              </>
+            ) : (
+              <>
+                <i className="bi bi-circle-fill text-warning me-1" style={{ fontSize: "8px" }}></i>
+                Reconnecting... Data refreshes every 10 seconds
+              </>
+            )}
           </small>
         </div>
       </div>

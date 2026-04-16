@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { getCandidates, submitVote } from "../services/api";
 
 function Vote() {
   const navigate = useNavigate();
 
+  const token = localStorage.getItem("studentToken");
   const matricNumber = localStorage.getItem("matricNumber");
   const studentName = localStorage.getItem("studentName");
 
@@ -11,128 +13,137 @@ function Vote() {
     localStorage.getItem("electionYear") ||
     new Date().getFullYear().toString();
 
-  const votingStatus =
-    localStorage.getItem(`votingStatus_${electionYear}`) || "closed";
-
   const [candidates, setCandidates] = useState([]);
   const [positions, setPositions] = useState([]);
   const [selectedVotes, setSelectedVotes] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
 
-  /* ================= LOAD CANDIDATES ================= */
-  useEffect(() => {
-    const stored =
-      JSON.parse(localStorage.getItem(`candidates_${electionYear}`)) || [];
+  const API_BASE_URL = "http://localhost:5000";
 
-    setCandidates(stored);
-
-    // Get unique positions and sort them
-    const uniquePositions = [...new Set(stored.map(c => c.position.trim()))];
-    setPositions(uniquePositions.sort());
-  }, [electionYear]);
-
-  /* ================= CHECK ELIGIBILITY ================= */
-  useEffect(() => {
-    const students =
-      JSON.parse(localStorage.getItem(`students_${electionYear}`)) || [];
-
-    const student = students.find(s => s.matric === matricNumber);
-
-    if (!student) {
-      alert("❌ You are not eligible to vote.");
-      navigate("/dashboard");
+  /* ================= LOAD CANDIDATES FROM BACKEND ================= */
+  const loadCandidates = async () => {
+    if (!token) {
+      navigate("/login");
       return;
     }
-
-    if (student.hasVoted) {
-      alert("❌ You have already voted.");
-      navigate("/dashboard");
+    
+    try {
+      const data = await getCandidates(token, electionYear);
+      setCandidates(data);
+      
+      // Get unique positions and sort them
+      const uniquePositions = [...new Set(data.map(c => c.position.trim()))];
+      setPositions(uniquePositions.sort());
+      setLoading(false);
+    } catch (err) {
+      console.error("Error loading candidates:", err);
+      setError("Failed to load candidates. Please refresh the page.");
+      setLoading(false);
     }
-  }, [electionYear, matricNumber, navigate]);
+  };
+
+  useEffect(() => {
+    loadCandidates();
+  }, [electionYear]);
 
   /* ================= CHECK VOTING STATUS ================= */
   useEffect(() => {
+    const votingStatus = localStorage.getItem(`votingStatus_${electionYear}`) || "closed";
     if (votingStatus !== "open") {
       alert("Voting is currently closed.");
       navigate("/dashboard");
     }
-  }, [navigate, votingStatus]);
+  }, [navigate, electionYear]);
 
   const handleSelect = (position, candidateId) => {
     // This ensures only ONE candidate per position is selected
     setSelectedVotes({ ...selectedVotes, [position]: candidateId });
   };
 
-  /* ================= SUBMIT VOTES ================= */
-  const handleSubmitVotes = () => {
+  /* ================= SUBMIT VOTES TO BACKEND WITH RECEIPT ================= */
+  const handleSubmitVotes = async () => {
     // Check if ALL positions have been voted for
     if (Object.keys(selectedVotes).length !== positions.length) {
       alert(`⚠️ Please vote for ALL positions.\n\nYou have voted for ${Object.keys(selectedVotes).length} out of ${positions.length} positions.`);
       return;
     }
 
-    /* ================= SAVE VOTES ================= */
-    const votesKey = `votes_${electionYear}`;
-    const votes = JSON.parse(localStorage.getItem(votesKey)) || {};
+    setSubmitting(true);
 
-    Object.values(selectedVotes).forEach(id => {
-      votes[id] = (votes[id] || 0) + 1;
-    });
+    try {
+      await submitVote(token, selectedVotes, electionYear);
+      
+      // ========== CREATE AND SAVE RECEIPT TO LOCALSTORAGE ==========
+      const receiptData = {
+        receiptId: `RCP-${electionYear}-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
+        electionYear: electionYear,
+        matricNumber: matricNumber,
+        studentName: studentName,
+        timestamp: new Date().toLocaleString(),
+        votes: Object.entries(selectedVotes).map(([position, candidateId]) => {
+          const candidate = candidates.find(c => c.id === candidateId);
+          return {
+            position: position,
+            candidateName: candidate?.name || "Unknown",
+            candidateId: candidateId
+          };
+        }),
+        confirmed: true,
+        status: "VERIFIED"
+      };
+      
+      // Save receipt to localStorage
+      localStorage.setItem(`receipt_${electionYear}_${matricNumber}`, JSON.stringify(receiptData));
+      
+      /* ================= NOTIFY DASHBOARD ================= */
+      window.dispatchEvent(new Event("voteUpdated"));
+      
+      alert("✅ Vote submitted successfully!");
+      
+      // Redirect to receipt page
+      navigate("/receipt");
+      
+    } catch (err) {
+      console.error("Error submitting vote:", err);
+      alert(err.message || "Failed to submit vote. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
-    localStorage.setItem(votesKey, JSON.stringify(votes));
-
-    /* ================= MARK STUDENT AS VOTED ================= */
-    localStorage.setItem(
-      `voted_${electionYear}_${matricNumber}`,
-      "true"
-    );
-
-    /* ================= UPDATE STUDENT RECORD ================= */
-    const studentsKey = `students_${electionYear}`;
-    const students =
-      JSON.parse(localStorage.getItem(studentsKey)) || [];
-
-    const updatedStudents = students.map(s => {
-      if (s.matric === matricNumber) {
-        return {
-          ...s,
-          hasVoted: true,
-          otp: null,
-          otpExpiry: null,
-        };
-      }
-      return s;
-    });
-
-    localStorage.setItem(
-      studentsKey,
-      JSON.stringify(updatedStudents)
-    );
-
-    /* ================= SAVE RECEIPT ================= */
-    const receipt = {
-      electionYear,
-      matricNumber,
-      votes: selectedVotes,
-      time: new Date().toLocaleString(),
-    };
-
-    localStorage.setItem(
-      `receipt_${electionYear}_${matricNumber}`,
-      JSON.stringify(receipt)
-    );
-
-    /* ================= NOTIFY DASHBOARD ================= */
-    window.dispatchEvent(new Event("voteUpdated"));
-
-    alert("✅ Vote submitted successfully!");
-
-    navigate("/dashboard");
+  // Helper function to get image URL
+  const getImageUrl = (imagePath) => {
+    if (!imagePath) return "https://via.placeholder.com/130x130?text=No+Image";
+    if (imagePath.startsWith('http')) return imagePath;
+    return `${API_BASE_URL}${imagePath}`;
   };
 
   // Calculate voting progress
   const votedCount = Object.keys(selectedVotes).length;
   const totalPositions = positions.length;
   const progressPercentage = totalPositions > 0 ? (votedCount / totalPositions) * 100 : 0;
+
+  if (loading) {
+    return (
+      <div className="container py-5 text-center">
+        <div className="spinner-border text-success" role="status">
+          <span className="visually-hidden">Loading...</span>
+        </div>
+        <p className="mt-3">Loading candidates...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="container py-5 text-center">
+        <div className="alert alert-danger">{error}</div>
+        <button className="btn btn-primary" onClick={loadCandidates}>Retry</button>
+      </div>
+    );
+  }
 
   return (
     <div className="container py-5">
@@ -168,7 +179,7 @@ function Vote() {
         </div>
       )}
 
-      {/* Positions Cards - Like AdminResults */}
+      {/* Positions Cards */}
       <div className="row g-4">
         {positions.map((position) => {
           const positionCandidates = candidates.filter(c => c.position.trim() === position);
@@ -208,10 +219,10 @@ function Vote() {
                             }}
                             onClick={() => handleSelect(position, candidate.id)}
                           >
-                            {/* Image at the top */}
+                            {/* Image at the top - FIXED URL */}
                             <div className="text-center pt-4 px-3">
                               <img
-                                src={candidate.image}
+                                src={getImageUrl(candidate.image)}
                                 alt={candidate.name}
                                 className="rounded-circle"
                                 style={{ 
@@ -220,6 +231,10 @@ function Vote() {
                                   objectFit: "cover",
                                   border: isSelected ? "3px solid #198754" : "3px solid #dee2e6",
                                   boxShadow: "0 4px 8px rgba(0,0,0,0.1)"
+                                }}
+                                onError={(e) => {
+                                  e.target.onerror = null;
+                                  e.target.src = "https://via.placeholder.com/130x130?text=No+Image";
                                 }}
                               />
                             </div>
@@ -272,6 +287,7 @@ function Vote() {
                                   e.stopPropagation();
                                   handleSelect(position, candidate.id);
                                 }}
+                                disabled={submitting}
                               >
                                 {isSelected ? (
                                   <>
@@ -304,9 +320,18 @@ function Vote() {
             <button
               className="btn btn-success btn-lg px-5"
               onClick={handleSubmitVotes}
-              disabled={votedCount !== totalPositions}
+              disabled={votedCount !== totalPositions || submitting}
             >
-              <i className="bi bi-send-check me-2"></i> Submit All Votes
+              {submitting ? (
+                <>
+                  <span className="spinner-border spinner-border-sm me-2" role="status"></span>
+                  Submitting...
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-send-check me-2"></i> Submit All Votes
+                </>
+              )}
             </button>
             {votedCount !== totalPositions && (
               <p className="small text-warning mt-3 mb-0">
@@ -314,7 +339,7 @@ function Vote() {
                 You must vote for ALL {totalPositions} positions before submitting
               </p>
             )}
-            {votedCount === totalPositions && (
+            {votedCount === totalPositions && !submitting && (
               <p className="small text-success mt-3 mb-0">
                 <i className="bi bi-check-circle me-1"></i>
                 You have voted for all {totalPositions} positions. Ready to submit!

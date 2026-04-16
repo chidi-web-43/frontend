@@ -189,7 +189,7 @@ function Navbar() {
                     to="/admin-dashboard"
                     onClick={closeNavbar}
                   >
-                    Admin Panel
+                    Admin 
                   </Link>
                 </li>
 

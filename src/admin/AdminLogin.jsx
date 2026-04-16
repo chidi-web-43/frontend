@@ -9,11 +9,9 @@ function AdminLogin() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const strongPassword =
-    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?#&])[A-Za-z\d@$!%*?#&]{8,}$/;
-
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
 
     if (!username || !password) {
@@ -21,16 +19,34 @@ function AdminLogin() {
       return;
     }
 
-    if (!strongPassword.test(password)) {
-      setError("Password must be strong.");
-      return;
-    }
+    setLoading(true);
+    setError("");
 
-    if (username === "admin" && password === "Admin@123") {
-      localStorage.setItem("adminAuth", "true");
-      navigate("/admin-dashboard");
-    } else {
-      setError("Invalid administrator credentials.");
+    try {
+      // Direct fetch to backend
+      const response = await fetch('http://localhost:5000/api/auth/admin-login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ username, password }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        // Save token and auth state
+        localStorage.setItem("adminAuth", "true");
+        localStorage.setItem("adminToken", data.token);
+        navigate("/admin-dashboard");
+      } else {
+        setError(data.message || "Invalid administrator credentials.");
+      }
+    } catch (err) {
+      console.error("Login error:", err);
+      setError("Network error. Please make sure the backend server is running.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -62,6 +78,7 @@ function AdminLogin() {
                 className="form-control form-control-lg"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
+                disabled={loading}
               />
             </div>
 
@@ -76,6 +93,7 @@ function AdminLogin() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Strong password required"
+                  disabled={loading}
                 />
                 <span
                   className="input-group-text"
@@ -87,8 +105,8 @@ function AdminLogin() {
               </div>
             </div>
 
-            <button type="submit" className="btn btn-primary btn-lg w-100 fw-semibold">
-              Login to Admin
+            <button type="submit" className="btn btn-primary btn-lg w-100 fw-semibold" disabled={loading}>
+              {loading ? "Logging in..." : "Login to Admin"}
             </button>
           </form>
         </div>

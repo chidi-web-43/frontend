@@ -1,77 +1,229 @@
 import { useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import Footer from "../components/Footer";
-import { isElectionLocked } from "../utils/ElectionLock";
+import { getAdminDashboard, controlVoting } from "../services/api";
+import { initializeSocket, getSocket, disconnectSocket } from "../services/socket";
 
 function AdminDashboard() {
   const navigate = useNavigate();
+  const token = localStorage.getItem("adminToken");
+  const electionYear = localStorage.getItem("electionYear") || new Date().getFullYear().toString();
 
-  const electionYear =
-    localStorage.getItem("electionYear") ||
-    new Date().getFullYear().toString();
+  const [votingStatus, setVotingStatus] = useState("closed");
+  const [stats, setStats] = useState({
+    totalStudents: 0,
+    totalCandidates: 0,
+    totalVotes: 0,
+    turnoutPercentage: 0
+  });
+  const [loading, setLoading] = useState(true);
+  const [isConnected, setIsConnected] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState(new Date());
 
-  const [votingStatus, setVotingStatus] = useState(
-    localStorage.getItem(`votingStatus_${electionYear}`) || "closed"
-  );
+  /* ================= LOAD DASHBOARD DATA FROM BACKEND ================= */
+  const loadDashboardData = async () => {
+    if (!token) {
+      navigate("/admin-login");
+      return;
+    }
+    
+    try {
+      const data = await getAdminDashboard(token, electionYear);
+      const status = data.electionStatus;
+      setVotingStatus(status);
+      // SAVE TO LOCALSTORAGE FOR OTHER PAGES TO READ
+      localStorage.setItem(`votingStatus_${electionYear}`, status);
+      setStats(data.stats);
+      setLastUpdate(new Date());
+      setLoading(false);
+    } catch (error) {
+      console.error("Error loading dashboard:", error);
+      setLoading(false);
+    }
+  };
+
+  /* ================= REAL-TIME SOCKET.IO CONNECTION ================= */
+  useEffect(() => {
+    if (!token) {
+      navigate("/admin-login");
+      return;
+    }
+    
+    // Initial load
+    loadDashboardData();
+    
+    // Initialize Socket.IO connection for real-time updates
+    const socket = initializeSocket(token, electionYear);
+    
+    if (socket) {
+      socket.on('connect', () => {
+        console.log('🔌 Admin: Socket.IO connected');
+        setIsConnected(true);
+      });
+      
+      socket.on('disconnect', () => {
+        console.log('🔌 Admin: Socket.IO disconnected');
+        setIsConnected(false);
+      });
+      
+      // Listen for vote updates - refresh dashboard instantly
+      socket.on('vote-updated', (data) => {
+        console.log('📡 Admin: Real-time vote update received', data);
+        loadDashboardData(); // Refresh dashboard instantly
+      });
+      
+      // Listen for election status changes
+      socket.on('election-status-changed', (data) => {
+        console.log('📡 Admin: Election status changed', data);
+        loadDashboardData(); // Refresh dashboard instantly
+      });
+    }
+    
+    // Fallback: Refresh every 10 seconds (in case socket disconnects)
+    const interval = setInterval(loadDashboardData, 10000);
+    
+    return () => {
+      disconnectSocket();
+      clearInterval(interval);
+    };
+  }, [electionYear, token]);
 
   /* ================= LOGOUT ================= */
   const handleLogout = () => {
     localStorage.removeItem("adminAuth");
+    localStorage.removeItem("adminToken");
+    disconnectSocket();
     navigate("/admin-login");
   };
 
   /* ================= VOTING CONTROL ================= */
-  const startVoting = () => {
-    localStorage.setItem(`votingStatus_${electionYear}`, "open");
-    setVotingStatus("open");
-    alert("✅ Voting has started");
+  const startVoting = async () => {
+    try {
+      await controlVoting(token, electionYear, "open");
+      setVotingStatus("open");
+      // SAVE TO LOCALSTORAGE FOR OTHER PAGES
+      localStorage.setItem(`votingStatus_${electionYear}`, "open");
+      alert("✅ Voting has started");
+      // Refresh dashboard to update stats
+      loadDashboardData();
+    } catch (error) {
+      alert("Error starting voting: " + error.message);
+    }
   };
 
-  const endVoting = () => {
-    localStorage.setItem(`votingStatus_${electionYear}`, "closed");
-    setVotingStatus("closed");
-    alert("❌ Voting has ended");
-  };
-
-  useEffect(() => {
-    if (!localStorage.getItem(`votingStatus_${electionYear}`)) {
+  const endVoting = async () => {
+    try {
+      await controlVoting(token, electionYear, "closed");
+      setVotingStatus("closed");
+      // SAVE TO LOCALSTORAGE FOR OTHER PAGES
       localStorage.setItem(`votingStatus_${electionYear}`, "closed");
+      alert("❌ Voting has ended");
+      // Refresh dashboard to update stats
+      loadDashboardData();
+    } catch (error) {
+      alert("Error ending voting: " + error.message);
     }
-  }, [electionYear]);
-  useEffect(() => {
-    const year = new Date().getFullYear().toString();
+  };
 
-    if (!localStorage.getItem("electionYear")) {
-      localStorage.setItem("electionYear", year);
-    }
-  }, []);
-
-  const locked = isElectionLocked(electionYear);
-
+  if (loading) {
+    return (
+      <div className="d-flex justify-content-center align-items-center" style={{ minHeight: "100vh" }}>
+        <div className="spinner-border text-primary" role="status">
+          <span className="visually-hidden">Loading...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: "#f4f6f9" }}>
       {/* ================= NAVBAR ================= */}
       <nav className="navbar navbar-dark bg-primary px-4 sticky-top">
         <span className="navbar-brand fw-bold">
+          <i className="bi bi-speedometer2 me-2"></i>
           SUG Admin Dashboard – {electionYear}
         </span>
-        <button onClick={handleLogout} className="btn btn-light btn-sm">
-          Logout
-        </button>
+        <div className="d-flex align-items-center">
+          {isConnected && (
+            <span className="badge bg-success me-2">
+              <i className="bi bi-wifi"></i> Live
+            </span>
+          )}
+          <button onClick={handleLogout} className="btn btn-light btn-sm">
+            <i className="bi bi-box-arrow-right me-1"></i> Logout
+          </button>
+        </div>
       </nav>
 
       <div className="container py-5">
         {/* ================= WELCOME ================= */}
         <div className="card shadow-sm mb-4">
           <div className="card-body">
-            <h4 className="fw-bold mb-1">Welcome, Administrator</h4>
-            <p className="text-muted mb-0">
-              Manage all election processes for the {electionYear} academic
-              session.
-            </p>
+            <div className="d-flex justify-content-between align-items-center">
+              <div>
+                <h4 className="fw-bold mb-1">Welcome, Administrator</h4>
+                <p className="text-muted mb-0">
+                  Manage all election processes for the {electionYear} academic session.
+                </p>
+              </div>
+              <small className="text-muted">
+                <i className="bi bi-clock me-1"></i>
+                Last updated: {lastUpdate.toLocaleTimeString()}
+              </small>
+            </div>
           </div>
         </div>
+
+        {/* ================= REAL-TIME STATUS INDICATOR ================= */}
+        <div className="mb-3 text-end">
+          {isConnected ? (
+            <span className="badge bg-success">
+              <i className="bi bi-circle-fill me-1" style={{ fontSize: "8px" }}></i>
+              Live Connection Active
+            </span>
+          ) : (
+            <span className="badge bg-warning">
+              <i className="bi bi-circle-fill me-1" style={{ fontSize: "8px" }}></i>
+              Reconnecting...
+            </span>
+          )}
+        </div>
+
+        {/* ================= STATS CARDS ================= */}
+        <div className="row">
+          <div className="col-md-3 mb-4">
+            <div className="card shadow-sm text-center h-100 p-3">
+              <h3 className="fw-bold text-primary">{stats.totalStudents || 0}</h3>
+              <p className="text-muted">Total Students</p>
+            </div>
+          </div>
+          <div className="col-md-3 mb-4">
+            <div className="card shadow-sm text-center h-100 p-3">
+              <h3 className="fw-bold text-primary">{stats.totalCandidates || 0}</h3>
+              <p className="text-muted">Total Candidates</p>
+            </div>
+          </div>
+          <div className="col-md-3 mb-4">
+            <div className="card shadow-sm text-center h-100 p-3">
+              <h3 className="fw-bold text-primary">{stats.totalVotes || 0}</h3>
+              <p className="text-muted">Total Votes Cast</p>
+            </div>
+          </div>
+          <div className="col-md-3 mb-4">
+            <div className="card shadow-sm text-center h-100 p-3">
+              <h3 className="fw-bold text-primary">{stats.turnoutPercentage || 0}%</h3>
+              <p className="text-muted">Voter Turnout</p>
+            </div>
+          </div>
+        </div>
+
+        {/* ================= VOTING STATUS WARNING ================= */}
+        {votingStatus === "open" && (
+          <div className="alert alert-warning text-center mb-4">
+            <i className="bi bi-exclamation-triangle-fill me-2"></i>
+            ⚠️ VOTING IS IN PROGRESS - Student upload and candidate management are LOCKED
+          </div>
+        )}
 
         {/* ================= ACTION CARDS ================= */}
         <div className="row">
@@ -88,6 +240,11 @@ function AdminDashboard() {
               >
                 Upload Students
               </button>
+              {votingStatus === "open" && (
+                <small className="text-danger d-block mt-2">
+                  <i className="bi bi-lock-fill me-1"></i> Locked while voting
+                </small>
+              )}
             </div>
           </div>
 
@@ -104,6 +261,11 @@ function AdminDashboard() {
               >
                 Manage Candidates
               </button>
+              {votingStatus === "open" && (
+                <small className="text-danger d-block mt-2">
+                  <i className="bi bi-lock-fill me-1"></i> Locked while voting
+                </small>
+              )}
             </div>
           </div>
 
@@ -122,10 +284,8 @@ function AdminDashboard() {
               </button>
             </div>
           </div>
-        </div>
 
-        {/* AUDIT LOGS CARD - NEW */}
-        <div className="row">
+          {/* AUDIT LOGS CARD */}
           <div className="col-md-4 mb-4">
             <div className="card shadow-sm text-center h-100 p-3">
               <h5 className="fw-bold">Audit Logs</h5>
@@ -145,7 +305,7 @@ function AdminDashboard() {
         {/* ================= VOTING CONTROL ================= */}
         <div className="card shadow-sm mt-4">
           <div className="card-body text-center">
-            <h5 className="fw-bold mb-3">Voting Control </h5>
+            <h5 className="fw-bold mb-3">Voting Control Panel</h5>
 
             <p className="fw-semibold mb-3">
               Current Status:
@@ -164,7 +324,7 @@ function AdminDashboard() {
               disabled={votingStatus === "open"}
               onClick={startVoting}
             >
-              Start Voting
+              <i className="bi bi-play-fill me-1"></i> Start Voting
             </button>
 
             <button
@@ -172,7 +332,7 @@ function AdminDashboard() {
               disabled={votingStatus === "closed"}
               onClick={endVoting}
             >
-              End Voting
+              <i className="bi bi-stop-fill me-1"></i> End Voting
             </button>
           </div>
         </div>
