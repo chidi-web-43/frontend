@@ -19,6 +19,7 @@ function Vote() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [showFullManifesto, setShowFullManifesto] = useState(null);
 
   const API_BASE_URL = "http://localhost:5000";
 
@@ -219,7 +220,7 @@ function Vote() {
                             }}
                             onClick={() => handleSelect(position, candidate.id)}
                           >
-                            {/* Image at the top - FIXED URL */}
+                            {/* Image at the top */}
                             <div className="text-center pt-4 px-3">
                               <img
                                 src={getImageUrl(candidate.image)}
@@ -258,7 +259,7 @@ function Vote() {
                               )}
                             </div>
                             
-                            {/* Candidate Details */}
+                            {/* Candidate Details with Manifesto */}
                             <div className="card-body text-center">
                               <h5 className="fw-bold mb-2">{candidate.name}</h5>
                               
@@ -269,9 +270,30 @@ function Vote() {
                                 <p className="mb-1 small text-muted">
                                   <i className="bi bi-book me-1"></i> {candidate.department}
                                 </p>
-                                <p className="mb-0 small text-muted">
+                                <p className="mb-1 small text-muted">
                                   <i className="bi bi-mortarboard me-1"></i> Level: {candidate.level}
                                 </p>
+                                
+                                {/* MANIFESTO DISPLAY */}
+                                {candidate.manifesto && (
+                                  <div className="mt-2 p-2 bg-light rounded text-start">
+                                    <small className="text-muted">
+                                      <i className="bi bi-chat-quote me-1 text-success"></i>
+                                      <strong>Promise:</strong> {candidate.manifesto.length > 80 ? candidate.manifesto.substring(0, 80) + "..." : candidate.manifesto}
+                                    </small>
+                                    {candidate.manifesto.length > 80 && (
+                                      <button 
+                                        className="btn btn-link btn-sm p-0 ms-1 text-success"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setShowFullManifesto(candidate);
+                                        }}
+                                      >
+                                        Read more
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             </div>
                             
@@ -353,6 +375,46 @@ function Vote() {
         <div className="alert alert-warning text-center">
           <i className="bi bi-exclamation-triangle me-2"></i>
           No candidates available for voting yet. Please check back later.
+        </div>
+      )}
+
+      {/* Manifesto Modal */}
+      {showFullManifesto && (
+        <div className="modal fade show d-block" tabIndex="-1" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <div className="modal-dialog modal-dialog-centered modal-lg">
+            <div className="modal-content">
+              <div className="modal-header bg-success text-white">
+                <h5 className="modal-title">
+                  <i className="bi bi-chat-quote me-2"></i>
+                  {showFullManifesto.name}'s Manifesto
+                </h5>
+                <button type="button" className="btn-close btn-close-white" onClick={() => setShowFullManifesto(null)}></button>
+              </div>
+              <div className="modal-body">
+                <div className="d-flex align-items-center mb-3">
+                  <img
+                    src={getImageUrl(showFullManifesto.image)}
+                    alt={showFullManifesto.name}
+                    width="60"
+                    height="60"
+                    className="rounded-circle me-3"
+                    style={{ objectFit: "cover" }}
+                  />
+                  <div>
+                    <h6 className="fw-bold mb-0">{showFullManifesto.name}</h6>
+                    <span className="badge bg-primary">{showFullManifesto.position}</span>
+                  </div>
+                </div>
+                <hr />
+                <div className="manifesto-content" style={{ whiteSpace: "pre-wrap", lineHeight: "1.6" }}>
+                  {showFullManifesto.manifesto}
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-secondary" onClick={() => setShowFullManifesto(null)}>Close</button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

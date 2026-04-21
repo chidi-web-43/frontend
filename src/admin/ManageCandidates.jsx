@@ -20,11 +20,13 @@ function ManageCandidates() {
   const [faculty, setFaculty] = useState("");
   const [department, setDepartment] = useState("");
   const [level, setLevel] = useState("");
+  const [manifesto, setManifesto] = useState("");
   const [image, setImage] = useState(null);
   const [imagePreview, setImagePreview] = useState("");
   const [candidates, setCandidates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [showFullManifesto, setShowFullManifesto] = useState(null);
 
   const API_BASE_URL = "http://localhost:5000";
 
@@ -98,6 +100,7 @@ function ManageCandidates() {
       formData.append("faculty", faculty);
       formData.append("department", department);
       formData.append("level", level);
+      formData.append("manifesto", manifesto);
       formData.append("image", image);
       formData.append("electionYear", electionYear);
 
@@ -109,6 +112,7 @@ function ManageCandidates() {
       setFaculty("");
       setDepartment("");
       setLevel("");
+      setManifesto("");
       setImage(null);
       setImagePreview("");
       
@@ -140,6 +144,12 @@ function ManageCandidates() {
         alert("Failed to delete candidate: " + error.message);
       }
     }
+  };
+
+  const getImageUrl = (imagePath) => {
+    if (!imagePath) return "https://via.placeholder.com/200x200?text=No+Image";
+    if (imagePath.startsWith('http')) return imagePath;
+    return `${API_BASE_URL}${imagePath}`;
   };
 
   if (loading) {
@@ -244,8 +254,28 @@ function ManageCandidates() {
           </div>
         </div>
 
+        {/* MANIFESTO FIELD */}
+        <div className="row">
+          <div className="col-12">
+            <label className="form-label fw-semibold mt-2">Candidate Manifesto / Agenda</label>
+            <textarea
+              className="form-control mb-3"
+              placeholder="Write candidate's manifesto, promises, and agenda here... What will they do if elected? Why should students vote for them?"
+              rows="5"
+              value={manifesto}
+              disabled={votingStatus === "open" || submitting}
+              onChange={(e) => setManifesto(e.target.value)}
+              style={{ resize: "vertical" }}
+            />
+            <small className="text-muted">
+              <i className="bi bi-info-circle me-1"></i>
+              Manifesto helps students make informed voting decisions
+            </small>
+          </div>
+        </div>
+
         <button
-          className="btn btn-primary w-100"
+          className="btn btn-primary w-100 mt-2"
           disabled={votingStatus === "open" || submitting}
           onClick={handleAddCandidate}
         >
@@ -253,7 +283,7 @@ function ManageCandidates() {
         </button>
       </div>
 
-      {/* CANDIDATE LIST - WITH FIXED IMAGE URL */}
+      {/* CANDIDATE LIST */}
       <div className="mt-4">
         <h5 className="fw-bold mb-3">Candidate List ({candidates.length})</h5>
         
@@ -265,7 +295,7 @@ function ManageCandidates() {
               <div className="col-md-6 col-lg-4 mb-4" key={c.id}>
                 <div className="card shadow-sm h-100">
                   <img
-                    src={c.image?.startsWith('http') ? c.image : `${API_BASE_URL}${c.image}`}
+                    src={getImageUrl(c.image)}
                     alt={c.name}
                     className="card-img-top"
                     style={{ height: "200px", objectFit: "cover" }}
@@ -291,6 +321,24 @@ function ManageCandidates() {
                       <p className="mb-1 small">
                         <strong>Votes:</strong> <span className="fw-bold text-success">{c.voteCount || 0}</span>
                       </p>
+                      
+                      {/* Manifesto Preview */}
+                      {c.manifesto && (
+                        <div className="mt-2 p-2 bg-light rounded">
+                          <small className="text-muted">
+                            <i className="bi bi-chat-quote me-1"></i>
+                            <strong>Manifesto:</strong> {c.manifesto.length > 100 ? c.manifesto.substring(0, 100) + "..." : c.manifesto}
+                          </small>
+                          {c.manifesto.length > 100 && (
+                            <button 
+                              className="btn btn-link btn-sm p-0 ms-2 text-primary"
+                              onClick={() => setShowFullManifesto(c)}
+                            >
+                              Read more
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="card-footer bg-white">
@@ -308,6 +356,46 @@ function ManageCandidates() {
           </div>
         )}
       </div>
+
+      {/* Manifesto Modal */}
+      {showFullManifesto && (
+        <div className="modal fade show d-block" tabIndex="-1" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <div className="modal-dialog modal-dialog-centered modal-lg">
+            <div className="modal-content">
+              <div className="modal-header bg-success text-white">
+                <h5 className="modal-title">
+                  <i className="bi bi-chat-quote me-2"></i>
+                  {showFullManifesto.name}'s Manifesto
+                </h5>
+                <button type="button" className="btn-close btn-close-white" onClick={() => setShowFullManifesto(null)}></button>
+              </div>
+              <div className="modal-body">
+                <div className="d-flex align-items-center mb-3">
+                  <img
+                    src={getImageUrl(showFullManifesto.image)}
+                    alt={showFullManifesto.name}
+                    width="60"
+                    height="60"
+                    className="rounded-circle me-3"
+                    style={{ objectFit: "cover" }}
+                  />
+                  <div>
+                    <h6 className="fw-bold mb-0">{showFullManifesto.name}</h6>
+                    <span className="badge bg-primary">{showFullManifesto.position}</span>
+                  </div>
+                </div>
+                <hr />
+                <div className="manifesto-content" style={{ whiteSpace: "pre-wrap", lineHeight: "1.6" }}>
+                  {showFullManifesto.manifesto}
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-secondary" onClick={() => setShowFullManifesto(null)}>Close</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Footer />
     </div>
