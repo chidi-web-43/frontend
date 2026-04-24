@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import logo from "../assets/logo.png";
-import {api} from "../utils/api.js";
 
 function AdminLogin() {
   const navigate = useNavigate();
@@ -11,7 +10,6 @@ function AdminLogin() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -26,15 +24,16 @@ function AdminLogin() {
 
     try {
       // Direct fetch to backend
-      // const response = await fetch('http://localhost:5000/api/auth/admin-login', {
-      //   method: 'POST',
-      //   headers: {
-      //     'Content-Type': 'application/json',
-      //   },
-      //   body: JSON.stringify({ username, password }),
-      // });
-       const response = await api.post('/auth/admin-login', { username, password });
-      const data = await response.data;
+      const response = await fetch('http://localhost:5000/api/auth/admin-login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ username, password }),
+      });
+      
+      // Parse the response data
+      const data = await response.json();
 
       if (response.ok) {
         // Save token and auth state
@@ -108,7 +107,7 @@ function AdminLogin() {
             </div>
 
             <button type="submit" className="btn btn-primary btn-lg w-100 fw-semibold" disabled={loading}>
-              {loading ? "Logging in..." : "Login to Admin"}
+              {loading ? "Logging in..." : "Login to Admin Panel"}
             </button>
           </form>
         </div>
